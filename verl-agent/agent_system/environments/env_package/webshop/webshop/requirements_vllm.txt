@@ -1,0 +1,13 @@
+# Compatibility set for the repository's Torch 2.6 / vLLM 0.8 stack.
+# Ray 2.50 requires OpenTelemetry >=1.30, while vLLM 0.8.5 requires <1.27.
+ray[default]==2.43.0
+vllm==0.8.5
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+wandb==0.19.8
+google-api-core==2.24.2
+proto-plus==1.26.1
+opentelemetry-exporter-prometheus==0.47b0
+# Newer Uvicorn releases require websockets>=13, but Gradio Client requires <12.
+uvicorn[standard]==0.34.3
+websockets==11.0.3

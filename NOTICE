@@ -1,0 +1,20 @@
+This project includes code from the verl project.
+
+Copyright 2023-2024 Bytedance Ltd. and/or its affiliates
+
+Additional modifications and contributions:
+
+Copyright 2025 Nanyang Technological University (NTU), Singapore and the verl-agent (GiGPO) team.
+
+EL-TSBPO adds task-aware root and branch allocation, probability calibration,
+physical-tree credit assignment, data collection, and training configurations.
+
+The WebShop environment code under
+verl-agent/agent_system/environments/env_package/webshop/webshop is distributed under the
+MIT license in its LICENSE.md file (Princeton Natural Language Processing).
+
+The included ALFWorld environment adapter derives from ALFWorld, distributed
+under the MIT license in its nested LICENSE file (Mohit Shridhar and others).
+
+The SFT configuration files are adapted from LlamaFactory examples, which are
+distributed under Apache License 2.0. LlamaFactory itself is not vendored here.

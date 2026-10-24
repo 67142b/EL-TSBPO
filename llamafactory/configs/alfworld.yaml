@@ -1,0 +1,41 @@
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+trust_remote_code: true
+
+stage: sft
+do_train: true
+finetuning_type: full
+deepspeed: llamafactory/configs/ds_z2_config.json
+
+dataset_dir: llamafactory/data
+dataset: alfworld_sft
+template: qwen
+cutoff_len: 2048
+max_samples: 100000
+preprocessing_num_workers: 16
+dataloader_num_workers: 4
+
+output_dir: verl-agent/.local/models/alfworld-sft
+logging_steps: 10
+save_steps: 500
+save_total_limit: 3
+plot_loss: true
+overwrite_output_dir: false
+save_only_model: true
+report_to: none
+
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 2
+learning_rate: 5.0e-6
+num_train_epochs: 2.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+flash_attn: fa2
+ddp_timeout: 180000000
+gradient_checkpointing: true
+resume_from_checkpoint: null
+
+val_size: 0.05
+per_device_eval_batch_size: 4
+eval_strategy: steps
+eval_steps: 200

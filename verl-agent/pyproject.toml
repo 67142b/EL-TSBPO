@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "el-tsbpo"
+version = "0.1.0"
+description = "EL-TSBPO training framework for agentic reinforcement learning"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+license = {file = "LICENSE"}
+dependencies = [
+  "accelerate",
+  "codetiming",
+  "datasets",
+  "dill",
+  "hydra-core",
+  "numpy",
+  "pandas",
+  "peft",
+  "pyarrow>=19.0.0",
+  "pylatexenc",
+  "ray[default]>=2.41.0,<=2.50.0",
+  "torchdata",
+  "tensordict>=0.8.0,<=0.10.0,!=0.9.0",
+  "transformers>=4.51.0,<=4.57.3",
+  "wandb",
+  "packaging>=20.0",
+  "openai",
+  "scipy",
+]
+
+[project.optional-dependencies]
+train = ["vllm>=0.8.5,<=0.11.0", "flash-attn", "gymnasium", "torchvision", "PyYAML"]
+alfworld = ["alfworld", "textworld", "termcolor"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = true
+include = ["agent_system*", "el_tsbpo*", "examples*", "gigpo*", "verl*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.html", "*.css", "*.png", "*.md", "*.txt", "LICENSE", "version/*"]

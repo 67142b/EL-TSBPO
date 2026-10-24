@@ -1,0 +1,134 @@
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  max_prompt_length: 2048
+  max_response_length: 512
+  filter_overlong_prompts: true
+  return_raw_chat: true
+
+actor_rollout_ref:
+  model:
+    use_remove_padding: true
+  actor:
+    ppo_mini_batch_size: 240
+    ppo_micro_batch_size_per_gpu: 4
+    loss_agg_mode: seq-mean-token-sum
+    invalid_action_penalty_coef: -1.0
+    kl_loss_type: low_var_kl_linear_tail
+    policy_loss:
+      loss_agg_mode: seq-mean-token-sum
+      use_global_turn_normalization: true
+    optim:
+      lr: 2.0e-6
+      override_lr_on_resume: true
+    fsdp_config:
+      optimizer_offload: true
+  rollout:
+    gpu_memory_utilization: 0.85
+    free_cache_engine: false
+    log_prob_micro_batch_size_per_gpu: 12
+    engine_kwargs:
+      vllm:
+        logprobs_mode: processed_logprobs
+    val_kwargs:
+      temperature: 0.4
+      do_sample: true
+    multi_turn:
+      enable: true
+  ref:
+    log_prob_micro_batch_size_per_gpu: 12
+
+algorithm:
+  adv_estimator: el_tsbpo
+  gamma: 0.95
+  el_tsbpo:
+    allocation_backend: agent_dps
+    state_memory_filename: agent_dps_state.json
+    state_memory_mode: fresh
+    state_prior_alpha: 1.0
+    state_prior_beta: 1.0
+    state_memory_decay: 0.90
+    state_memory_horizon: 0
+    state_memory_max_states: 100000
+    state_memory_save_interval: 1
+    agent_dps_root_decay: 0.95
+    agent_dps_root_similarity_enabled: true
+    agent_dps_root_similarity_threshold: 0.95
+    agent_dps_root_similarity_top_k: 8
+    agent_dps_root_similarity_max_strength: 4.0
+    agent_dps_root_embedding_model_path: null
+    agent_dps_root_embedding_cache_dir: null
+    agent_dps_root_min_quota: 2
+    agent_dps_root_candidate_ratio: 8.0
+    agent_dps_root_exploration_fraction: 0.30
+    agent_dps_root_curriculum_temperature: 0.25
+    agent_dps_initial_branch_size: 4
+    agent_dps_min_new_branch: 4
+    agent_dps_branch_objective: terminal_contrast
+    agent_dps_branch_task_union: true
+    agent_dps_branch_particles: 512
+    agent_dps_branch_beam_width: 4
+    agent_dps_hmm_prior_alpha: 1.0
+    agent_dps_hmm_transition_decay: 0.9
+    agent_dps_tie_break_seed: 17
+    agent_dps_branch_similarity:
+      enabled: true
+      model_path: ${algorithm.el_tsbpo.agent_dps_root_embedding_model_path}
+      cache_dir: null
+      device: auto
+      threshold: 0.95
+      goal_threshold: 0.90
+      top_k: 8
+      max_strength: 4.0
+      batch_size: 4
+      max_length: 1024
+      gpu_memory_gib: 2.5
+      gpu_reserve_gib: 4.0
+      min_host_free_gib: 3.0
+      cpu_threads: 2
+      timeout_seconds: 600
+      cache_entries: 20000
+    agent_dps_probability_calibration: true
+    agent_dps_allocation_diagnostics_dir: null
+    root_budget: 0
+    root_budgets: null
+    branch_budget: 0
+    min_branch_depth: 0
+    max_branch_depth: 30
+    epsilon: 1.0e-6
+    max_anchors_per_batch: 64
+    branch_worker_pool_size: 64
+    branch_token_budget: 16384
+    branch_ready_queue_batch_size: 32
+    branch_ready_queue_timeout_ms: 50
+    branch_horizon_bucket_size: 8
+    branch_local_token_packing: false
+    branch_continuous_refill: true
+    shuffle_actor_rows: true
+    advantage_mode: graph_gigpo
+    trajectory_advantage_weight: 1.0
+    gigpo_step_advantage_w: 1.0
+    gigpo_mode: mean_norm
+    gigpo_enable_similarity: false
+    gigpo_similarity_thresh: 0.95
+    graph_gigpo_use_tree_discounted_step_return: true
+    graph_gigpo_segment_balance: true
+    graph_gigpo_segment_weight_cap: 6.0
+
+env:
+  rollout:
+    n: 6
+  lazy_validation: true
+  release_validation_after_use: true
+
+trainer:
+  project_name: el_tsbpo
+  logger: [console]
+  max_actor_ckpt_to_keep: 1
+  max_critic_ckpt_to_keep: 1
+  save_freq: 25
+  test_freq: 5
+  total_epochs: 200
+  val_before_train: false
