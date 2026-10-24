@@ -3,14 +3,16 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 : "${CUDA_VISIBLE_DEVICES:?Set CUDA_VISIBLE_DEVICES to the GPUs assigned to this run}"
+export EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES="${EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES%%,*}}"
 
 WORK_DIR="${EL_TSBPO_WORK_DIR:-$ROOT/.local}"
 MODEL="${EL_TSBPO_MODEL:-$WORK_DIR/models/webshop-sft}"
 EMBEDDING="${EL_TSBPO_EMBEDDING_MODEL:-$WORK_DIR/models/Qwen3-Embedding-0.6B}"
 DATA="$WORK_DIR/data/webshop"
 WEBSHOP="$ROOT/agent_system/environments/env_package/webshop/webshop"
-export TMPDIR="${TMPDIR:-$WORK_DIR/tmp}"
+export TMPDIR="${TMPDIR:-/tmp/el-tsbpo-${UID}}"
 export RAY_DISABLE_DASHBOARD=1 RAY_USAGE_STATS_ENABLED=0 TOKENIZERS_PARALLELISM=false
 export MULTIPROCESSING_START_METHOD=spawn
 export OMP_NUM_THREADS=1

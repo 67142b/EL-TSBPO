@@ -15,7 +15,7 @@ actor_rollout_ref:
     ppo_mini_batch_size: 240
     ppo_micro_batch_size_per_gpu: 4
     loss_agg_mode: seq-mean-token-sum
-    invalid_action_penalty_coef: -1.0
+    invalid_action_penalty_coef: 1.0
     kl_loss_type: low_var_kl_linear_tail
     policy_loss:
       loss_agg_mode: seq-mean-token-sum

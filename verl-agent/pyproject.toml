@@ -7,7 +7,7 @@ name = "el-tsbpo"
 version = "0.1.0"
 description = "EL-TSBPO training framework for agentic reinforcement learning"
 readme = "README.md"
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.10,<3.13"
 license = {file = "LICENSE"}
 dependencies = [
   "accelerate",
