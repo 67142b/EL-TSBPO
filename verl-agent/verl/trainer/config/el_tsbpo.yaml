@@ -12,8 +12,10 @@ actor_rollout_ref:
     use_remove_padding: true
   actor:
     ppo_mini_batch_size: 240
-    ppo_micro_batch_size_per_gpu: 4
     loss_agg_mode: seq-mean-token-sum
+    entropy_coeff: 0.0
+    use_kl_loss: true
+    kl_loss_coef: 0.05
     invalid_action_penalty_coef: 1.0
     kl_loss_type: low_var_kl_linear_tail
     policy_loss:
@@ -40,7 +42,6 @@ actor_rollout_ref:
 
 algorithm:
   adv_estimator: el_tsbpo
-  gamma: 0.95
   el_tsbpo:
     allocation_backend: agent_dps
     state_memory_filename: agent_dps_state.json
@@ -88,8 +89,6 @@ algorithm:
     agent_dps_probability_calibration: true
     root_budget: 0
     branch_budget: 0
-    min_branch_depth: 0
-    max_branch_depth: 30
     epsilon: 1.0e-6
     max_anchors_per_batch: 64
     branch_worker_pool_size: 64

@@ -26,22 +26,27 @@ export OMP_NUM_THREADS=1
 }
 mkdir -p "$DATA" "$TMPDIR" "$WORK_DIR/cache"
 GPU_COUNT="$(awk -F, '{print NF}' <<<"$CUDA_VISIBLE_DEVICES")"
+(( 90 % GPU_COUNT == 0 && 240 % GPU_COUNT == 0 )) || {
+    printf 'ALFWorld needs a GPU count dividing both the 90 root rollouts and 240-turn PPO minibatch.\n' >&2
+    exit 1
+}
 
 python3 -m examples.data_preprocess.prepare_simple \
-    --mode text --local_dir "$DATA" --train_data_size 16 --val_data_size 120
+    --mode text --local_dir "$DATA" --train_data_size 15 --val_data_size 120
 
 exec python3 -m verl.trainer.main_ppo --config-name el_tsbpo \
     data.train_files="$DATA/text/train.parquet" \
     data.val_files="$DATA/text/test.parquet" \
-    data.train_batch_size=16 data.val_batch_size=120 \
+    data.train_batch_size=15 data.val_batch_size=120 \
     actor_rollout_ref.model.path="$MODEL" \
-    actor_rollout_ref.actor.kl_loss_coef=0.05 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.enable_chunked_prefill=false \
     actor_rollout_ref.rollout.enforce_eager=false \
     +actor_rollout_ref.rollout.cudagraph_capture_sizes='[1,2,4,8,16,24,32,48,64]' \
     algorithm.el_tsbpo.root_budget=90 \
     algorithm.el_tsbpo.branch_budget=120 \
+    algorithm.el_tsbpo.graph_gigpo_segment_balance=false \
     algorithm.el_tsbpo.agent_dps_root_embedding_model_path="$EMBEDDING" \
     algorithm.el_tsbpo.agent_dps_root_embedding_cache_dir="$WORK_DIR/cache/alfworld_tasks" \
     algorithm.el_tsbpo.agent_dps_branch_similarity.cache_dir="$WORK_DIR/cache/alfworld_states" \

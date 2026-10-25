@@ -1276,7 +1276,7 @@ def compute_el_tsbpo_advantage(
     terminal_reward: Sequence | None = None,
     node_is_terminal: Sequence | None = None,
     trajectory_advantage_weight: float = 1.0,
-    gamma: float = 0.95,
+    gamma: float = 1.0,
     epsilon: float = 1e-6,
     advantage_mode: str = "graph_gigpo",
     gigpo_step_rewards: torch.Tensor | None = None,
