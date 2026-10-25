@@ -13,6 +13,10 @@ outputs/
 logs/
 *.log
 *.lpg
+*.out
+*.err
+events.out.tfevents*
+wandb/
 *.journal.jsonl
 *.tmp
 *.part

@@ -12,7 +12,7 @@ EL-TSBPO is a two-stage training workflow for language-model agents in ALFWorld 
 | [`llamafactory/`](llamafactory/) | SFT configurations and dataset registration; install LlamaFactory separately |
 | [`docs/assets/`](docs/assets/) | Figures from the manuscript |
 
-The SFT datasets, checkpoints, ALFWorld game data, and WebShop product data are deliberately excluded. Local outputs are written under `verl-agent/.local/` and ignored by Git.
+The SFT datasets, checkpoints, ALFWorld game data, and WebShop product data are deliberately excluded. Generated models, task data, and checkpoints use the ignored `verl-agent/.local/` directory by default; Hydra run logs are written outside the repository.
 
 ## Method
 
@@ -141,7 +141,7 @@ CUDA_VISIBLE_DEVICES=0,1 bash examples/el_tsbpo_trainer/run_webshop.sh
 cd ..
 ```
 
-The ALFWorld command selects 15 tasks from 120 candidates, uses 90 root and 120 branch rollouts, and disables optional segment weighting. The WebShop command selects 16 tasks from 128 candidates, uses 96 root and 128 branch rollouts, and enables segment weighting with cap 6. Both use unit tree-backup discount, a fixed-reference coefficient of 0.05, and zero entropy regularization. The WebShop script requires an even number of GPUs. Set `EL_TSBPO_MODEL` to override a checkpoint and `EL_TSBPO_WORK_DIR` to relocate local training outputs. The branch semantic encoder uses the first selected GPU when its bounded headroom check passes; set `EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES` to use another GPU. The common RL defaults live in [`el_tsbpo.yaml`](verl-agent/verl/trainer/config/el_tsbpo.yaml); the scripts contain only benchmark-specific overrides. They call the trainer directly, without a `screen` session.
+The ALFWorld command selects 15 tasks from 120 candidates, uses 90 root and 120 branch rollouts, and disables optional segment weighting. The WebShop command selects 16 tasks from 128 candidates, uses 96 root and 128 branch rollouts, and enables segment weighting with cap 6. Both use a tree step-backup discount of 0.95, a fixed-reference coefficient of 0.05, and zero entropy regularization. The WebShop script requires an even number of GPUs. Set `EL_TSBPO_MODEL` to override a checkpoint and `EL_TSBPO_WORK_DIR` to relocate local training outputs. Hydra writes run logs outside the repository under `${XDG_STATE_HOME:-$HOME/.local/state}/el-tsbpo/logs`; set `EL_TSBPO_LOG_DIR` to change that location. The branch semantic encoder uses the first selected GPU when its bounded headroom check passes; set `EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES` to use another GPU. The common RL defaults live in [`el_tsbpo.yaml`](verl-agent/verl/trainer/config/el_tsbpo.yaml); the scripts contain only benchmark-specific overrides. They call the trainer directly, without a `screen` session.
 
 For the optional ALFWorld segment comparison, pass `algorithm.el_tsbpo.graph_gigpo_segment_balance=true` to its launcher. For the WebShop Instruct initialization comparison, set `EL_TSBPO_MODEL` to the Instruct checkpoint and pass `actor_rollout_ref.actor.kl_loss_coef=0.01` to its launcher. Give each run a distinct `trainer.experiment_name` when using these overrides.
 

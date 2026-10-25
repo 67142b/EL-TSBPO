@@ -42,6 +42,7 @@ actor_rollout_ref:
 
 algorithm:
   adv_estimator: el_tsbpo
+  gamma: 0.95
   el_tsbpo:
     allocation_backend: agent_dps
     state_memory_filename: agent_dps_state.json

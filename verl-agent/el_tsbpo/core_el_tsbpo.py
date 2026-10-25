@@ -72,7 +72,7 @@ def compute_tree_backups(
     node_is_terminal: Sequence | None = None,
     active_weight: Sequence | torch.Tensor | None = None,
     edge_penalty: Sequence | torch.Tensor | None = None,
-    gamma: float = 1.0,
+    gamma: float = 0.95,
     epsilon: float = 1e-6,
 ) -> dict[str, Any]:
     """Back up terminal rewards through the physical sampled tree."""
@@ -1276,7 +1276,7 @@ def compute_el_tsbpo_advantage(
     terminal_reward: Sequence | None = None,
     node_is_terminal: Sequence | None = None,
     trajectory_advantage_weight: float = 1.0,
-    gamma: float = 1.0,
+    gamma: float = 0.95,
     epsilon: float = 1e-6,
     advantage_mode: str = "graph_gigpo",
     gigpo_step_rewards: torch.Tensor | None = None,

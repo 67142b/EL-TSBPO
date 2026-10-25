@@ -8,6 +8,7 @@ export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES="${EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES%%,*}}"
 
 WORK_DIR="${EL_TSBPO_WORK_DIR:-$ROOT/.local}"
+LOG_DIR="${EL_TSBPO_LOG_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/el-tsbpo/logs}"
 MODEL="${EL_TSBPO_MODEL:-$WORK_DIR/models/webshop-sft}"
 EMBEDDING="${EL_TSBPO_EMBEDDING_MODEL:-$WORK_DIR/models/Qwen3-Embedding-0.6B}"
 DATA="$WORK_DIR/data/webshop"
@@ -35,6 +36,7 @@ python3 -m examples.data_preprocess.prepare_simple \
     --mode text --local_dir "$DATA" --train_data_size 16 --val_data_size 128
 
 exec python3 -m verl.trainer.main_ppo --config-name el_tsbpo \
+    hydra.run.dir="$LOG_DIR/webshop/\${now:%Y-%m-%d}/\${now:%H-%M-%S}" \
     data.train_files="$DATA/text/train.parquet" \
     data.val_files="$DATA/text/test.parquet" \
     data.train_batch_size=16 data.val_batch_size=128 data.max_prompt_length=4608 \
