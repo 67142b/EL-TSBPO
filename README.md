@@ -22,6 +22,8 @@ The rollout tree records each factual trajectory and the continuations sampled f
 
 The allocator uses calibrated task and state evidence to distribute factual root and branch samples under separate budgets. Branch selection conditions on the remaining interaction horizon and allocates within a task-level mixed-outcome objective.
 
+Probability calibration and task-level union allocation are enabled in the default RL configuration. Branch diagnostics label this path as `prediction_model=conditional_calibrated_beta_mixture_task_union`, with `state_prior.calibration_model=conditional_beta_mixture`. The per-query `state_prior.calibrated` field is true once the calibrator has evidence from at least two other tasks; it can be false during a cold start.
+
 ![Root and branch budget allocation](docs/assets/figure3_budget_allocation.png)
 
 ## Setup

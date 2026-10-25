@@ -75,7 +75,6 @@ actor_rollout_ref:
       - extra
     optim:
       lr: 1e-6
-      override_lr_on_resume: false
       lr_warmup_steps: -1
       lr_warmup_steps_ratio: 0.0
       min_lr_ratio: 0.0

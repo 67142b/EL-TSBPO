@@ -4,7 +4,6 @@ defaults:
 
 data:
   max_prompt_length: 2048
-  max_response_length: 512
   filter_overlong_prompts: true
   return_raw_chat: true
 
@@ -22,7 +21,6 @@ actor_rollout_ref:
       use_global_turn_normalization: true
     optim:
       lr: 2.0e-6
-      override_lr_on_resume: true
     fsdp_config:
       optimizer_offload: true
   rollout:
@@ -66,12 +64,9 @@ algorithm:
     agent_dps_root_curriculum_temperature: 0.25
     agent_dps_initial_branch_size: 4
     agent_dps_min_new_branch: 4
-    agent_dps_branch_objective: terminal_contrast
     agent_dps_branch_task_union: true
     agent_dps_branch_particles: 512
     agent_dps_branch_beam_width: 4
-    agent_dps_hmm_prior_alpha: 1.0
-    agent_dps_hmm_transition_decay: 0.9
     agent_dps_tie_break_seed: 17
     agent_dps_branch_similarity:
       enabled: true
@@ -91,9 +86,7 @@ algorithm:
       timeout_seconds: 600
       cache_entries: 20000
     agent_dps_probability_calibration: true
-    agent_dps_allocation_diagnostics_dir: null
     root_budget: 0
-    root_budgets: null
     branch_budget: 0
     min_branch_depth: 0
     max_branch_depth: 30
@@ -127,7 +120,6 @@ trainer:
   project_name: el_tsbpo
   logger: [console]
   max_actor_ckpt_to_keep: 1
-  max_critic_ckpt_to_keep: 1
   save_freq: 25
   test_freq: 5
   total_epochs: 200
