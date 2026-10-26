@@ -8,7 +8,7 @@ EL-TSBPO is a two-stage training workflow for language-model agents in ALFWorld 
 
 | Path | Contents |
 | --- | --- |
-| [`verl-agent/`](verl-agent/) | RL framework, ALFWorld and WebShop environments, EL-TSBPO algorithm, collectors, tests, and two training scripts |
+| [`verl-agent/`](verl-agent/) | RL framework, ALFWorld and WebShop environments, EL-TSBPO algorithm, collectors, and two training scripts |
 | [`llamafactory/`](llamafactory/) | SFT configurations and dataset registration; install LlamaFactory separately |
 | [`docs/assets/`](docs/assets/) | Figures from the manuscript |
 
@@ -141,20 +141,35 @@ CUDA_VISIBLE_DEVICES=0,1 bash examples/el_tsbpo_trainer/run_webshop.sh
 cd ..
 ```
 
-The ALFWorld command selects 15 tasks from 120 candidates, uses 90 root and 120 branch rollouts, and disables optional segment weighting. The WebShop command selects 16 tasks from 128 candidates, uses 96 root and 128 branch rollouts, and enables segment weighting with cap 6. Both use a tree step-backup discount of 0.95, a fixed-reference coefficient of 0.05, and zero entropy regularization. The WebShop script requires an even number of GPUs. Set `EL_TSBPO_MODEL` to override a checkpoint and `EL_TSBPO_WORK_DIR` to relocate local training outputs. Hydra creates run directories outside the repository under `${XDG_STATE_HOME:-$HOME/.local/state}/el-tsbpo/logs`; set `EL_TSBPO_LOG_DIR` to change that location. Scalar training metrics print to stdout by default, so capture stdout or enable a persistent tracking backend to retain plot data. The branch semantic encoder selects an assigned GPU with sufficient available memory; set `EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES` to restrict its choices. The common RL defaults live in [`el_tsbpo.yaml`](verl-agent/verl/trainer/config/el_tsbpo.yaml); the scripts contain only benchmark-specific overrides. They call the trainer directly, without a `screen` session.
+The ALFWorld command selects 15 tasks from 120 candidates, uses 90 root and 120 branch rollouts, and disables optional segment weighting. The WebShop command selects 16 tasks from 128 candidates, uses 96 root and 128 branch rollouts, and enables segment weighting with cap 6. Both use a tree step-backup discount of 0.95, a fixed-reference coefficient of 0.05, and zero entropy regularization. The WebShop script requires an even number of GPUs. Set `EL_TSBPO_MODEL` to override a checkpoint and `EL_TSBPO_WORK_DIR` to relocate local training outputs. Each launcher saves full-precision scalar metrics and other console output to a unique `train.log` outside the repository under `${XDG_STATE_HOME:-$HOME/.local/state}/el-tsbpo/logs`; set `EL_TSBPO_LOG_DIR` to change that location. The branch semantic encoder selects an assigned GPU with sufficient available memory; set `EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES` to restrict its choices. The common RL defaults live in [`el_tsbpo.yaml`](verl-agent/verl/trainer/config/el_tsbpo.yaml); the scripts contain only benchmark-specific overrides. They call the trainer directly, without a `screen` session.
+
+Training logs contain the step-indexed metrics needed to reconstruct the paper's training curves. Older figure scripts use `bu_trace/sampling/*`; the current log uses the equivalent `el_tsbpo/sampling/*` names. Figure 6's normalized group density is `el_tsbpo/tree/graph_gigpo_group_occurrences_mean / (episode/length/mean * episode/natural_valid_action_ratio)`, computed separately at each update.
+
+| Paper figure | Logged metrics or source |
+| --- | --- |
+| Figure 4 | Separate complete-task, task-family evaluation; the aggregate online validation log cannot recover these rates. |
+| Figure 5 | `agent_dps/allocator/{candidate,selected}_contrast_probability_mean`, `agent_dps/outcome/{terminal_contrast_branch_rate,same_first_edge_terminal_contrast_branch_rate}`. |
+| Figure 6 | Group density above, for each comparison run. |
+| Figure 7 | `episode/{valid_action_ratio,action_format_valid_ratio}`, `actor/entropy_loss`, `response_length/mean`. |
+| Figure 8 | `actor/{pg_loss,entropy_loss,kl_loss}`, `episode/truncation_rate`, `el_tsbpo/tree/graph_gigpo_{sibling_child_mass_relative_gap_max,raw_sibling_child_mass_relative_gap_max}`, `val/success_rate`. |
+| Figure 9 | `val/success_rate`, `agent_dps/outcome/{new_mixed_states,homogeneous_factual_opposite_branch_rate}`. |
+| Figure 10 | `val/success_rate`, `actor/entropy_loss`, `response_length/mean`, `timing_s/{step,testing,save_checkpoint}`; subtract recorded validation and checkpoint durations from each corresponding step. |
+| Figures A3–A4 | `el_tsbpo/sampling/{bare,branch}_terminal_success_rate`, `episode/{natural,branch}_valid_action_ratio`, `episode/length/mean`, `val/success_rate`, `sampling/effective_ratio`, and the two Figure 5 suffix-contrast metrics. |
+
+Comparisons require separate logs for each configuration. Logs provide the metric types and step order; they do not reproduce historical numeric curves without rerunning those configurations. Smoothing should use each complete ordered series, including intermittent online validation records, without inserting gaps for missing metric values on intervening steps.
 
 For the optional ALFWorld segment comparison, pass `algorithm.el_tsbpo.graph_gigpo_segment_balance=true` to its launcher. For the WebShop Instruct initialization comparison, set `EL_TSBPO_MODEL` to the Instruct checkpoint and pass `actor_rollout_ref.actor.kl_loss_coef=0.01` to its launcher. Give each run a distinct `trainer.experiment_name` when using these overrides.
 
 ## Verification
 
-In the RL environment, run the focused CPU checks:
+In the RL environment, check the import paths and launcher syntax:
 
 ```bash
 conda activate el-tsbpo-alfworld
 cd verl-agent
 python -c 'import verl, el_tsbpo; print(verl.__file__); print(el_tsbpo.__file__)'
-python -m pip install pytest
-python -m pytest -q tests/trainer/ppo
+bash -n examples/el_tsbpo_trainer/run_alfworld.sh
+bash -n examples/el_tsbpo_trainer/run_webshop.sh
 ```
 
 The printed module paths should be inside this checkout. If either points to another editable checkout, activate the new benchmark environment and reinstall this repository there. The launchers also prepend their own repository root to `PYTHONPATH` for Ray workers. Full training requires GPU, environment assets, and model checkpoints. The repository contains no pretrained weights or collected demonstrations.

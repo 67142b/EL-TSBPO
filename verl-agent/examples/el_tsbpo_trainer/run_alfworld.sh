@@ -28,6 +28,7 @@ DATA="$WORK_DIR/data/alfworld"
 export ALFWORLD_DATA="${ALFWORLD_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/alfworld}"
 export TMPDIR="${TMPDIR:-/tmp/el-tsbpo-${UID}}"
 export RAY_DISABLE_DASHBOARD=1 RAY_USAGE_STATS_ENABLED=0 TOKENIZERS_PARALLELISM=false
+export EL_TSBPO_LOG_FULL_PRECISION=1
 export MULTIPROCESSING_START_METHOD=spawn
 export OMP_NUM_THREADS=1
 [[ -f "$MODEL/config.json" && -d "$EMBEDDING" ]] || {
@@ -48,8 +49,11 @@ GPU_COUNT="$(awk -F, '{print NF}' <<<"$CUDA_VISIBLE_DEVICES")"
 python3 -m examples.data_preprocess.prepare_simple \
     --mode text --local_dir "$DATA" --train_data_size 15 --val_data_size 120
 
-exec python3 -m verl.trainer.main_ppo --config-name el_tsbpo \
-    hydra.run.dir="$LOG_DIR/alfworld/\${now:%Y-%m-%d}/\${now:%H-%M-%S}" \
+mkdir -p "$LOG_DIR/alfworld/$(date +%F)"
+RUN_DIR="$(mktemp -d "$LOG_DIR/alfworld/$(date +%F)/$(date +%H-%M-%S)-XXXXXX")"
+printf 'Training log: %s\n' "$RUN_DIR/train.log"
+python3 -u -m verl.trainer.main_ppo --config-name el_tsbpo \
+    hydra.run.dir="$RUN_DIR" \
     data.train_files="$DATA/text/train.parquet" \
     data.val_files="$DATA/text/test.parquet" \
     data.train_batch_size=15 data.val_batch_size=120 \
@@ -70,4 +74,5 @@ exec python3 -m verl.trainer.main_ppo --config-name el_tsbpo \
     env.max_steps=50 \
     trainer.experiment_name=alfworld \
     trainer.n_gpus_per_node="$GPU_COUNT" \
-    "$@"
+    trainer.val_before_train=true \
+    "$@" 2>&1 | tee "$RUN_DIR/train.log"

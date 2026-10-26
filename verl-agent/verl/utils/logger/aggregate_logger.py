@@ -17,14 +17,16 @@ A Ray logger will receive logging info from different processes.
 
 import logging
 import numbers
+import os
 from typing import Dict
 
 
 def concat_dict_to_str(dict: Dict, step):
     output = [f"step:{step}"]
+    precision = ".10g" if os.environ.get("EL_TSBPO_LOG_FULL_PRECISION") == "1" else ".3f"
     for k, v in dict.items():
         if isinstance(v, numbers.Number):
-            output.append(f"{k}:{v:.3f}")
+            output.append(f"{k}:{v:{precision}}")
     output_str = " - ".join(output)
     return output_str
 

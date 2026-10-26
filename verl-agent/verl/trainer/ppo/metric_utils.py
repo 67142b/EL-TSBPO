@@ -91,6 +91,7 @@ _EL_TSBPO_QUALITY_METRICS = frozenset(
         "el_tsbpo/rollout/branch_generation_efficiency_mean_batch_rows",
         "el_tsbpo/rollout/branch_ready_mean_rows",
         "el_tsbpo/tree/graph_gigpo_fallback_fraction",
+        "el_tsbpo/tree/graph_gigpo_group_occurrences_mean",
         "el_tsbpo/tree/graph_gigpo_subtree_abs_mean",
         "el_tsbpo/tree/graph_gigpo_local_abs_mean",
         "el_tsbpo/tree/graph_gigpo_trajectory_policy_weight_p95",

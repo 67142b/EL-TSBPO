@@ -1040,6 +1040,7 @@ def _graph_gigpo_recursive_advantage(
                 (graph_effective_weight > 0).sum().item()
             ),
             "graph_gigpo_state_groups": int(state_count),
+            "graph_gigpo_group_occurrences_mean": active_count / max(1, state_count),
             "graph_gigpo_multi_action_states": int(multi_action_states),
             "graph_gigpo_homogeneous_states": int(homogeneous_states),
             "graph_gigpo_unique_edges": int(unique_edge_count),
