@@ -100,8 +100,10 @@ class BranchSimilarity:
             db.close()
 
     def reset_stats(self):
+        self._failed_keys = set()
         self.stats = dict(cache_hits=0, cache_misses=0, encoded=0, encode_seconds=0.,
                           cpu_calls=0, cuda_calls=0, fallback_calls=0, skipped=0,
+                          retry_suppressed=0,
                           truncated=0, cuda_peak_mib=0., missing_goal=0,
                           host_raw_free_gib=0., host_reclaimable_gib=0., host_available_gib=0.,
                           host_memory_skips=0, cuda_budget_mib=0., cuda_free_before_mib=0.,
@@ -142,23 +144,20 @@ class BranchSimilarity:
             for name in ['RANK', 'LOCAL_RANK', 'WORLD_SIZE', 'MASTER_ADDR', 'MASTER_PORT',
                          'PYTORCH_CUDA_ALLOC_CONF', 'PYTORCH_ALLOC_CONF']:
                 env.pop(name, None)
-            attempts = [self.options['device']]
-            if attempts[0] != 'cpu':
-                attempts.append('cpu')
-            for attempt, device in enumerate(attempts):
-                available = _host_available()
-                host = _host_memory()
-                for field, source in [('host_raw_free_gib', 'raw_free'),
-                                      ('host_reclaimable_gib', 'reclaimable'),
-                                      ('host_available_gib', 'available')]:
-                    self.stats[field] = float(host[source] or 0) / 2**30
-                if available is not None and available < float(self.options['min_host_free_gib']) * 2**30:
-                    self.stats['host_memory_skips'] += 1
-                    print('[EL-TSBPO-DPS] semantic encoder skipped: low cgroup host memory '
-                          f"(raw={self.stats['host_raw_free_gib']:.2f} GiB, "
-                          f"clean_inactive_file={self.stats['host_reclaimable_gib']:.2f} GiB, "
-                          f"available={self.stats['host_available_gib']:.2f} GiB)", flush=True)
-                    break
+            device = self.options['device']
+            host = _host_memory()
+            for field, source in [('host_raw_free_gib', 'raw_free'),
+                                  ('host_reclaimable_gib', 'reclaimable'),
+                                  ('host_available_gib', 'available')]:
+                self.stats[field] = float(host[source] or 0) / 2**30
+            available = host['available']
+            if available is not None and available < float(self.options['min_host_free_gib']) * 2**30:
+                self.stats['host_memory_skips'] += 1
+                print('[EL-TSBPO-DPS] semantic encoder skipped: low cgroup host memory '
+                      f"(raw={self.stats['host_raw_free_gib']:.2f} GiB, "
+                      f"clean_inactive_file={self.stats['host_reclaimable_gib']:.2f} GiB, "
+                      f"available={self.stats['host_available_gib']:.2f} GiB)", flush=True)
+            else:
                 with (directory / 'worker.log').open('w') as log:
                     try:
                         proc = subprocess.run(
@@ -189,8 +188,11 @@ class BranchSimilarity:
                     return vectors
                 self.stats['fallback_calls'] += 1
                 tail = (directory / 'worker.log').read_text(errors='replace')[-1200:]
+                status_path = directory / 'worker_status.json'
+                status = json.loads(status_path.read_text()) if status_path.exists() else {}
                 print(f'[EL-TSBPO-DPS] semantic encoder {device} failed; '
-                      f'{"retrying CPU" if attempt + 1 < len(attempts) else "using exact evidence only"}: {tail}',
+                      f"using exact evidence only (selected_gpu={status.get('cuda_visible_device_selected')}, "
+                      f"reason={status.get('device_reason')}, status={status.get('status')}): {tail}",
                       flush=True)
         self.stats['encode_seconds'] += time.perf_counter() - started
         self.stats['skipped'] += len(texts)
@@ -217,15 +219,19 @@ class BranchSimilarity:
         self.stats['cache_hits'] += len(cached)
         missing = {key: text for key, text in texts.items() if key not in cached}
         self.stats['cache_misses'] += len(missing)
-        if missing:
-            vectors = self._run_encoder(list(missing.values()))
+        pending = {key: text for key, text in missing.items() if key not in self._failed_keys}
+        self.stats['retry_suppressed'] += len(missing) - len(pending)
+        if pending:
+            vectors = self._run_encoder(list(pending.values()))
             if vectors is not None:
                 now = time.time_ns()
                 with self._connect() as db:
                     db.executemany('INSERT OR REPLACE INTO vectors VALUES (?, ?, ?, ?)',
                                    [(key, len(v), np.asarray(v, dtype=np.float16).tobytes(), now)
-                                    for key, v in zip(missing, vectors)])
-                cached.update(dict(zip(missing, vectors)))
+                                    for key, v in zip(pending, vectors)])
+                cached.update(dict(zip(pending, vectors)))
+            else:
+                self._failed_keys.update(pending)
 
         for state, keys in bindings.items():
             if all(key in cached for key in keys.values()):
@@ -380,29 +386,43 @@ def _cuda_budget(options, free_bytes, minimum, *, before_context=False):
 
 
 def _encoder_event(request_path, info):
+    local = request_path.parent / 'worker_status.json'
+    previous = json.loads(local.read_text()) if local.exists() else {}
+    event = dict(previous, pid=os.getpid(), time=time.time(), **info)
+    for path in (local, request_path.parent.parent / 'encoder_last.json'):
+        temporary = path.with_suffix(f'.{os.getpid()}.tmp')
+        temporary.write_text(json.dumps(event))
+        os.replace(temporary, path)
 
 
-    path = request_path.parent.parent / 'encoder_last.json'
-    temporary = path.with_suffix(f'.{os.getpid()}.tmp')
-    temporary.write_text(json.dumps(dict(pid=os.getpid(), time=time.time(), **info)))
-    os.replace(temporary, path)
+def _encoder_candidate_devices():
+    """The launcher lists physical training GPUs; Ray may mask its CPU collector."""
+    visible = (os.environ.get('EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES')
+               or os.environ.get('EL_TSBPO_CUDA_VISIBLE_DEVICES')
+               or os.environ.get('CUDA_VISIBLE_DEVICES', '0'))
+    if visible.strip() == '-1':
+        return []
+    return list(dict.fromkeys(part.strip() for part in visible.split(',') if part.strip()))
 
 
-def _encoder_visible_device():
-    visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-    if visible is not None and visible.strip() == '-1':
-        return ''
-    if not visible or not visible.strip():
-        visible = (os.environ.get('EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES')
-                   or os.environ.get('EL_TSBPO_CUDA_VISIBLE_DEVICES'))
-        if visible and visible.strip() == '-1':
-            return ''
-        if visible and visible.strip() != '-1':
-
-            os.environ['CUDA_VISIBLE_DEVICES'] = visible.split(',')[0].strip()
-        elif 'CUDA_VISIBLE_DEVICES' not in os.environ:
-            visible = '0'
-    return (visible or '').split(',')[0].strip()
+def _select_encoder_gpu(model_path, options):
+    minimum = _minimum_cuda_budget(model_path, options)
+    candidates = []
+    for gpu in _encoder_candidate_devices():
+        try:
+            probe = subprocess.run(['nvidia-smi', '-i', gpu, '--query-gpu=memory.free',
+                                    '--format=csv,noheader,nounits'],
+                                   text=True, capture_output=True, check=False, timeout=5)
+            if probe.returncode == 0:
+                free = float(probe.stdout.strip()) * 2**20
+                if _cuda_budget(options, free, minimum, before_context=True):
+                    candidates.append((free, gpu))
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            continue
+    if not candidates:
+        return None, 0., minimum
+    free, gpu = max(candidates, key=lambda item: item[0])
+    return gpu, free, minimum
 
 
 def _encode_worker(request_path, requested_device):
@@ -414,31 +434,21 @@ def _encode_worker(request_path, requested_device):
                 cuda_budget_mib=0., cuda_oom_retries=0, status='selecting',
                 texts=len(request['texts']))
     minimum = None
-
-
     if requested_device != 'cpu':
         info['cuda_visible_devices_inherited'] = os.environ.get('CUDA_VISIBLE_DEVICES')
-        visible = _encoder_visible_device()
+        visible, free, minimum = _select_encoder_gpu(request['model'], opts)
         info['cuda_visible_device_selected'] = visible
-        if visible and visible != '-1':
-            probe = subprocess.run(['nvidia-smi', '-i', visible,
-                                    '--query-gpu=memory.free', '--format=csv,noheader,nounits'],
-                                   text=True, capture_output=True, check=False, timeout=5)
-            if probe.returncode == 0:
-                free = float(probe.stdout.strip()) * 2**20
-                info['cuda_free_before_mib'] = free / 2**20
-                minimum = _minimum_cuda_budget(request['model'], opts)
-                if _cuda_budget(opts, free, minimum, before_context=True):
-                    device = 'cuda'
-                    info['device_reason'] = 'gpu_fits_bounded_budget'
-                else:
-                    info['device_reason'] = 'insufficient_gpu_headroom'
-            else:
-                info['device_reason'] = 'gpu_probe_failed'
+        if visible:
+            os.environ['CUDA_VISIBLE_DEVICES'] = visible
+            info['cuda_free_before_mib'] = free / 2**20
+            device = 'cuda'
+            info['device_reason'] = 'gpu_fits_bounded_budget'
         else:
-            info['device_reason'] = 'no_visible_gpu'
+            info['device_reason'] = 'no_training_gpu_with_headroom'
     info['device'] = device
     _encoder_event(request_path, info)
+    if requested_device != 'cpu' and device != 'cuda':
+        raise RuntimeError('No training GPU has enough free memory for the semantic encoder')
     import torch
     from transformers import AutoModel, AutoTokenizer
     torch.set_num_threads(int(opts['cpu_threads']))

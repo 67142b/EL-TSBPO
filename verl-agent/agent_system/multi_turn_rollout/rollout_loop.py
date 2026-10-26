@@ -1669,6 +1669,7 @@ class TrajectoryCollector:
             )
 
         branch_current_admissibles: List[List[str]] = [[] for _ in range(n_branches)]
+        branch_current_prompt_commands: List[List[str]] = [[] for _ in range(n_branches)]
         branch_replayed_observations: List[str] = [""] * n_branches
 
 
@@ -1688,6 +1689,11 @@ class TrajectoryCollector:
                 return
             worker_rows = [branch_info[index]["worker_idx"] for index in indices]
             admissible_rows = branch_envs.get_admissible_commands_batch(worker_rows)
+            prompt_rows = (
+                branch_envs.get_prompt_commands_batch(worker_rows)
+                if hasattr(branch_envs, "get_prompt_commands_batch")
+                else admissible_rows
+            )
             if hasattr(branch_envs, "get_observations_batch"):
                 observation_rows = branch_envs.get_observations_batch(worker_rows)
             else:
@@ -1698,6 +1704,9 @@ class TrajectoryCollector:
                 branch_started[branch_index] = True
                 branch_current_admissibles[branch_index] = list(
                     admissible_rows[local_index] or []
+                )
+                branch_current_prompt_commands[branch_index] = list(
+                    prompt_rows[local_index] or []
                 )
                 branch_replayed_observations[branch_index] = str(
                     observation_rows[local_index]
@@ -1768,6 +1777,9 @@ class TrajectoryCollector:
         initial_admissibles = [
             branch_current_admissibles[index] for index in alive_indices
         ]
+        initial_prompt_commands = [
+            branch_current_prompt_commands[index] for index in alive_indices
+        ]
 
         admissible_map = {i: idx for idx, i in enumerate(alive_indices)}
         nat_alive = alive_indices
@@ -1776,14 +1788,14 @@ class TrajectoryCollector:
             bi = branch_info[i]
             bn = bi["branch_node"]
             current_obs = branch_prompt_obs[i]
-            admissible = (
-                initial_admissibles[admissible_map[i]] if i in admissible_map else []
+            prompt_commands = (
+                initial_prompt_commands[admissible_map[i]] if i in admissible_map else []
             )
             prompt = self._build_branch_prompt(
                 task=bn.task,
                 memory_steps=branch_memory[i],
                 current_obs=current_obs,
-                admissible_commands=admissible,
+                admissible_commands=prompt_commands,
                 history_length=history_length,
             )
             nat_prompts.append(prompt)
@@ -2232,6 +2244,11 @@ class TrajectoryCollector:
                     branch_current_admissibles[i] = list(
                         info_i.get("admissible_commands", []) or []
                     )
+                    branch_current_prompt_commands[i] = list(
+                        info_i.get(
+                            "prompt_commands", branch_current_admissibles[i]
+                        ) or []
+                    )
 
 
                 branch_prompt_obs[i] = obs_str
@@ -2311,6 +2328,7 @@ class TrajectoryCollector:
 
 
             admissibles = [branch_current_admissibles[i] for i in still_alive]
+            prompt_commands = [branch_current_prompt_commands[i] for i in still_alive]
 
             next_prompts = []
             for j, i in enumerate(still_alive):
@@ -2321,7 +2339,9 @@ class TrajectoryCollector:
                     task=bn.task,
                     memory_steps=branch_memory[i],
                     current_obs=cur_obs,
-                    admissible_commands=admissibles[j] if j < len(admissibles) else [],
+                    admissible_commands=(
+                        prompt_commands[j] if j < len(prompt_commands) else []
+                    ),
                     history_length=history_length,
                 )
                 next_prompts.append(prompt)
@@ -3539,7 +3559,7 @@ class TrajectoryCollector:
         factual_outcomes: Mapping[str, float] | None = None,
         factual_task_ids: Mapping[str, str] | None = None,
     ):
-        """Allocate branch rollouts with a finite horizon and task-union objective."""
+        """Allocate branch rollouts for local factual-state contrast."""
         from agent_system.multi_turn_rollout.agent_dps import (
             AgentDPSNode,
             action_key,
@@ -3556,7 +3576,7 @@ class TrajectoryCollector:
         state_posterior = None
         state_prior_memory = None
         task_union_plans = []
-        from agent_system.multi_turn_rollout.dps_survival import allocate_task_union
+        from agent_system.multi_turn_rollout.dps_survival import allocate_local_state_contrast
         from agent_system.multi_turn_rollout.dps_state_prior import (
             StatePriorMemory,
             StatePriorPosterior,
@@ -3703,13 +3723,7 @@ class TrajectoryCollector:
         nodes_by_task: dict[str, list[AgentDPSNode]] = defaultdict(list)
         records_by_key: dict[str, dict[str, Any]] = {}
         node_by_key: dict[str, AgentDPSNode] = {}
-        excluded_candidates = 0
-        excluded_state_groups = 0
         for key, members in sorted(grouped.items()):
-            if str(members[0].task_uid) in mixed_bare_tasks:
-                excluded_candidates += len(members)
-                excluded_state_groups += 1
-                continue
             members = sorted(
                 members, key=lambda item: (int(item.step_idx), str(item.anchor_id))
             )
@@ -3854,6 +3868,7 @@ class TrajectoryCollector:
             records_by_key[key] = {
                 "state_group_key": key,
                 "task_ref": str(representative.task_uid),
+                "bare_task_mixed": str(representative.task_uid) in mixed_bare_tasks,
                 "conditioned_probability": float(probability),
                 "branch_objective": "terminal_contrast",
                 "prediction_model": "conditional_calibrated_beta_mixture_task_union",
@@ -3908,12 +3923,12 @@ class TrajectoryCollector:
             node for task_nodes in nodes_by_task.values() for node in task_nodes
         ]
         if global_budget > 0 and all_nodes:
-            allocations, allocator_metrics, task_union_plans = allocate_task_union(
+            allocations, allocator_metrics, task_union_plans = allocate_local_state_contrast(
                 all_nodes,
                 global_budget,
                 opening=max(opening_size, int(cfg.get("agent_dps_min_new_branch", 4))),
                 max_k=min(global_budget, branch_worker_capacity),
-                beam=int(cfg.get("agent_dps_branch_beam_width", 4)),
+                already_mixed_tasks=mixed_bare_tasks,
             )
         else:
             allocator_metrics.update(
@@ -3988,6 +4003,10 @@ class TrajectoryCollector:
         )
         total_multi = sum((int(item["candidate_count"]) > 1 for item in records))
         used = sum((int(item.continuation_count) for item in allocations))
+        bare_mixed_records = [record for record in records if record["bare_task_mixed"]]
+        selected_bare_mixed_records = [
+            record for record in bare_mixed_records if record["allocated_k"] > 0
+        ]
         task_allocated = defaultdict(int)
         for allocation in allocations:
             node = node_by_key.get(str(allocation.state_group_key))
@@ -4192,15 +4211,17 @@ class TrajectoryCollector:
                 selected_multi / max(1, total_multi)
             ),
             "agent_dps/allocator/reject_homogeneous_groups": float(reject_homogeneous),
+            "agent_dps/allocator/local_state_contrast_enabled": 1.0,
             "agent_dps/allocator/single_anchor_k_cap": float(branch_worker_capacity),
-            "agent_dps/allocator/bare_mixed_tasks_excluded": float(
-                len(mixed_bare_tasks)
+            "agent_dps/allocator/bare_mixed_state_groups_considered": float(
+                len(bare_mixed_records)
             ),
-            "agent_dps/allocator/bare_mixed_candidates_excluded": float(
-                excluded_candidates
+            "agent_dps/allocator/selected_bare_mixed_state_groups": float(
+                len(selected_bare_mixed_records)
             ),
-            "agent_dps/allocator/bare_mixed_state_groups_excluded": float(
-                excluded_state_groups
+            "agent_dps/allocator/bare_mixed_branch_budget_fraction": float(
+                sum(record["allocated_k"] for record in selected_bare_mixed_records)
+                / max(1, used)
             ),
             "agent_dps/allocator/n_factual_mixed_states": float(factual_mixed),
             "agent_dps/allocator/n_factual_homogeneous_states": float(
@@ -4486,7 +4507,8 @@ class TrajectoryCollector:
                 "branch",
                 {
                     "budget": global_budget,
-                    "excluded_bare_mixed_task_refs": sorted(mixed_bare_tasks),
+                    "branch_utility": "local_state_contrast",
+                    "bare_mixed_task_refs": sorted(mixed_bare_tasks),
                     "task_union_plans": task_union_plans,
                     "state_prior_model": state_posterior.diagnostics()
                     if state_posterior
@@ -5499,6 +5521,7 @@ class TrajectoryCollector:
             observed_mixed_count = 0
             homogeneous_factual_count = 0
             opposite_branch_count = 0
+            opposite_branch_count_in_bare_mixed_tasks = 0
             transition_contrast_state_count = 0
             transition_contrast_branch_count = 0
             terminal_contrast_state_count = 0
@@ -5568,7 +5591,7 @@ class TrajectoryCollector:
                 )
                 if factual_is_homogeneous:
                     homogeneous_factual_count += 1
-                    opposite_branch_count += int(
+                    created_local_contrast = int(
                         (
                             factual_success > 0
                             and any(value < 0.5 for value in state_branch_values)
@@ -5578,6 +5601,9 @@ class TrajectoryCollector:
                             and any(value >= 0.5 for value in state_branch_values)
                         )
                     )
+                    opposite_branch_count += created_local_contrast
+                    if record.get("bare_task_mixed", False):
+                        opposite_branch_count_in_bare_mixed_tasks += created_local_contrast
             branch_success_rate = (
                 float(sum(value >= 0.5 for value in branch_values) / len(branch_values))
                 if branch_values
@@ -5636,6 +5662,9 @@ class TrajectoryCollector:
                         / max(1, observed_state_count)
                     ),
                     "agent_dps/outcome/new_mixed_states": float(opposite_branch_count),
+                    "agent_dps/outcome/new_mixed_states_in_bare_mixed_tasks": float(
+                        opposite_branch_count_in_bare_mixed_tasks
+                    ),
                     "agent_dps/outcome/mixed_state_rate_gain": float(
                         opposite_branch_count / max(1, observed_state_count)
                     ),
@@ -5743,7 +5772,10 @@ class TrajectoryCollector:
                     )
                 final_mixed = sum(len(v) == 2 for v in labels.values())
                 for plan in self._agent_dps_task_union_plans:
-                    actual = int(len(labels.get(plan["task_ref"], ())) == 2)
+                    actual = int(
+                        not plan.get("already_mixed_bare", False)
+                        and len(labels.get(plan["task_ref"], ())) == 2
+                    )
                     task_results.append(dict(**plan, observed_activation=bool(actual)))
                 metrics.update(
                     {

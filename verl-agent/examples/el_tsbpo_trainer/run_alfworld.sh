@@ -5,7 +5,20 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 : "${CUDA_VISIBLE_DEVICES:?Set CUDA_VISIBLE_DEVICES to the GPUs assigned to this run}"
-export EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES="${EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES%%,*}}"
+BRANCH_EMBEDDING_GPUS="${EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"
+IFS=',' read -r -a embedding_gpu_list <<<"$BRANCH_EMBEDDING_GPUS"
+(( ${#embedding_gpu_list[@]} > 0 )) || {
+    printf 'Branch encoder GPU list must not be empty.\n' >&2
+    exit 2
+}
+for embedding_gpu in "${embedding_gpu_list[@]}"; do
+    if [[ -z "$embedding_gpu" || ",$CUDA_VISIBLE_DEVICES," != *",$embedding_gpu,"* ]]; then
+        printf 'Branch encoder GPU %s is not assigned to this run (%s).\n' \
+            "$embedding_gpu" "$CUDA_VISIBLE_DEVICES" >&2
+        exit 2
+    fi
+done
+export EL_TSBPO_BRANCH_EMBEDDING_CUDA_VISIBLE_DEVICES="$BRANCH_EMBEDDING_GPUS"
 
 WORK_DIR="${EL_TSBPO_WORK_DIR:-$ROOT/.local}"
 LOG_DIR="${EL_TSBPO_LOG_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/el-tsbpo/logs}"
@@ -52,6 +65,7 @@ exec python3 -m verl.trainer.main_ppo --config-name el_tsbpo \
     algorithm.el_tsbpo.agent_dps_root_embedding_model_path="$EMBEDDING" \
     algorithm.el_tsbpo.agent_dps_root_embedding_cache_dir="$WORK_DIR/cache/alfworld_tasks" \
     algorithm.el_tsbpo.agent_dps_branch_similarity.cache_dir="$WORK_DIR/cache/alfworld_states" \
+    algorithm.el_tsbpo.agent_dps_branch_similarity.timeout_seconds="${EL_TSBPO_BRANCH_EMBEDDING_TIMEOUT_SECONDS:-180}" \
     env.env_name=alfworld/AlfredTWEnv \
     env.max_steps=50 \
     trainer.experiment_name=alfworld \

@@ -30,3 +30,4 @@ llamafactory/data/*.json
 verl-agent/agent_system/environments/env_package/webshop/webshop/data/
 verl-agent/agent_system/environments/env_package/webshop/webshop/search_engine/indexes*/
 verl-agent/agent_system/environments/env_package/webshop/webshop/resources*/
+verl-agent/tests/

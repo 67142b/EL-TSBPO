@@ -53,9 +53,15 @@ def _format_webshop_actions(available_actions: Dict[str, Any]) -> List[str]:
         actions.append('search[<your query>]')
     actions.extend(
         f"click[{text}]" for text in available_actions.get('clickables', [])
-        if str(text).strip().lower() != 'search'
     )
     return actions
+
+
+def _format_webshop_admissible_actions(available_actions: Dict[str, Any]) -> List[str]:
+    return [
+        action for action in _format_webshop_actions(available_actions)
+        if action.lower() != 'click[search]'
+    ]
 
 
 class BranchWebshopWorker:
@@ -111,7 +117,8 @@ class BranchWebshopWorker:
         self._last_observation = _format_webshop_observation(observation, self.task)
         self._last_info = {
             'won': False,
-            'admissible_commands': _format_webshop_actions(available),
+            'admissible_commands': _format_webshop_admissible_actions(available),
+            'prompt_commands': _format_webshop_actions(available),
             'available_actions': available,
             'webshop.session_id': self.session_id,
             'webshop.seed': self.seed,
@@ -134,7 +141,8 @@ class BranchWebshopWorker:
             'task_score': float(task_score),
             'executed_action': str(action),
             'available_actions': available,
-            'admissible_commands': _format_webshop_actions(available),
+            'admissible_commands': _format_webshop_admissible_actions(available),
+            'prompt_commands': _format_webshop_actions(available),
             'webshop.session_id': self.session_id,
             'webshop.seed': self.seed,
             'extra.gamefile': str(self.session_id),
@@ -343,6 +351,7 @@ class BranchAlfworldEnvs:
         self._same_gamefile_reuses = 0
 
         self._admissible_cache: List[Optional[List[str]]] = []
+        self._prompt_command_cache: List[Optional[List[str]]] = []
 
 
         self._observation_cache: List[Optional[str]] = []
@@ -391,6 +400,7 @@ class BranchAlfworldEnvs:
             self._active.append(False)
             self._gamefile_cache.append(None)
             self._admissible_cache.append(None)
+            self._prompt_command_cache.append(None)
             self._observation_cache.append(None)
             free_slots.append(slot)
 
@@ -453,6 +463,7 @@ class BranchAlfworldEnvs:
                 self._same_gamefile_reuses += 1
             self._active[slot] = True
             self._admissible_cache[slot] = None
+            self._prompt_command_cache[slot] = None
             self._observation_cache[slot] = None
             replay_futures.append((slot, worker.replay.remote(br["action_history"])))
 
@@ -464,6 +475,9 @@ class BranchAlfworldEnvs:
             if ok:
                 self._admissible_cache[worker_idx] = list(
                     infos.get("admissible_commands", [])
+                )
+                self._prompt_command_cache[worker_idx] = list(
+                    infos.get("prompt_commands", infos.get("admissible_commands", []))
                 )
                 self._observation_cache[worker_idx] = str(obs or "")
                 indices.append(worker_idx)
@@ -480,6 +494,7 @@ class BranchAlfworldEnvs:
                 )
                 self._active[worker_idx] = False
                 self._admissible_cache[worker_idx] = None
+                self._prompt_command_cache[worker_idx] = None
                 self._observation_cache[worker_idx] = None
                 indices.append(-1)
         return indices
@@ -567,6 +582,10 @@ class BranchAlfworldEnvs:
             else:
                 admissible = []
             self._admissible_cache[worker_idx] = list(admissible)
+            self._prompt_command_cache[worker_idx] = list(
+                info.get("prompt_commands", admissible) if isinstance(info, dict)
+                else admissible
+            )
             self._observation_cache[worker_idx] = str(obs or "")
             completed.append({
                 "worker_idx": worker_idx,
@@ -608,6 +627,9 @@ class BranchAlfworldEnvs:
             self._admissible_cache[worker_indices[pos]] = list(
                 info.get("admissible_commands", [])
             )
+            self._prompt_command_cache[worker_indices[pos]] = list(
+                info.get("prompt_commands", info.get("admissible_commands", []))
+            )
             self._observation_cache[worker_indices[pos]] = str(obs or "")
             out[pos] = (obs, reward, bool(dones), info)
         return out
@@ -635,6 +657,14 @@ class BranchAlfworldEnvs:
             for widx in worker_indices
         ]
 
+    def get_prompt_commands_batch(self, worker_indices: List[int]) -> List[List[str]]:
+        return [
+            list(self._prompt_command_cache[widx] or [])
+            if self._is_alive(widx)
+            else []
+            for widx in worker_indices
+        ]
+
     def get_remaining_steps_batch(self, worker_indices: List[int]) -> List[int]:
         futures = []
         positions = []
@@ -654,6 +684,7 @@ class BranchAlfworldEnvs:
         if 0 <= worker_idx < len(self.workers) and self.workers[worker_idx] is not None:
             self._active[worker_idx] = False
             self._admissible_cache[worker_idx] = None
+            self._prompt_command_cache[worker_idx] = None
             self._observation_cache[worker_idx] = None
 
     def close_all(self):
@@ -679,6 +710,7 @@ class BranchAlfworldEnvs:
                 self._active[i] = False
                 self._gamefile_cache[i] = None
                 self._admissible_cache[i] = None
+                self._prompt_command_cache[i] = None
                 self._observation_cache[i] = None
 
 
@@ -755,6 +787,7 @@ class BranchWebshopEnvs(BranchAlfworldEnvs):
         self._reconfigured_workers = 0
         self._same_gamefile_reuses = 0
         self._admissible_cache = []
+        self._prompt_command_cache = []
         self._observation_cache = []
 
     def _worker_seed(self, slot: int) -> int:

@@ -180,3 +180,104 @@ def allocate_task_union(nodes, budget, *, opening=4, max_k=8, beam=4):
         bayesian_terminal_objective_enabled=1, prefilter_keep_fraction=1,
         acquisition_prefilter_enabled=0).items()}
     return allocations, metrics, details
+
+
+def allocate_local_state_contrast(nodes, budget, *, opening=4, max_k=8,
+                                  already_mixed_tasks=()):
+    """Allocate globally for new contrast at each factual state group."""
+    from .agent_dps import AgentDPSAllocation
+
+    budget = max(0, int(budget))
+    opening = max(4, int(opening))
+    max_k = min(budget, int(max_k))
+    mixed_tasks = {str(task) for task in already_mixed_tasks}
+    eligible = []
+    for node in sorted(nodes, key=lambda item: (-item.tie_breaker, item.state_key)):
+        factual_labels = {float(value) >= .5 for value in node.factual_outcomes}
+        if len(factual_labels) != 1 or not node.opposite_particles:
+            continue
+        opposite = np.clip(np.asarray(node.opposite_particles, dtype=np.float64), 0., 1.)
+        if not np.isfinite(opposite).all():
+            raise ValueError('Nonfinite local state contrast probability')
+        if not np.any(opposite > 0.):
+            continue
+        k_values = np.arange(max_k + 1)
+        gains = (1. - (1. - opposite[:, None]) ** k_values).mean(axis=0)
+        eligible.append((node, opposite, gains))
+
+    dp = np.full(budget + 1, -np.inf)
+    dp[0] = 0.
+    choices = []
+    for _, _, gains in eligible:
+        updated = dp.copy()
+        chosen = np.zeros(budget + 1, dtype=np.int32)
+        for count in range(opening, max_k + 1):
+            scores = dp[:-count] + gains[count]
+            better = scores > updated[count:] + 1e-12
+            updated[count:][better] = scores[better]
+            chosen[count:][better] = count
+        dp = updated
+        choices.append(chosen)
+
+    used = max(range(budget + 1), key=lambda count: (round(float(dp[count]), 12), -count))
+    cursor = used
+    counts = [0] * len(eligible)
+    for index in range(len(eligible) - 1, -1, -1):
+        count = int(choices[index][cursor])
+        counts[index] = count
+        cursor -= count
+    if cursor != 0:
+        raise RuntimeError('Broken local state allocation trace')
+
+    allocations = []
+    selected_by_task = defaultdict(list)
+    for (node, opposite, gains), count in zip(eligible, counts):
+        if count == 0:
+            continue
+        utility = float(gains[count])
+        node.current_k, node.opened = count, True
+        selected_by_task[str(node.task_uid)].append((node, opposite, count, utility))
+        allocations.append(AgentDPSAllocation(
+            anchor_id=node.anchor_id, trajectory_id=node.trajectory_id,
+            continuation_count=count, predicted_mean=node.probability,
+            predicted_uncertainty=math.sqrt(node.uncertainty),
+            external_cost=float(count), score=utility,
+            cumulative_utility=utility, marginal_utility=utility,
+            marginal_cost=float(count), marginal_efficiency=utility / count,
+            marginal_score=utility, marginal_score_efficiency=utility / count,
+            state_group_key=node.state_key, factual_count=len(node.factual_outcomes),
+            physical_factual_count=max(1, node.existing_factual_count)))
+
+    plans = []
+    for task, selected in sorted(selected_by_task.items()):
+        predicted_activation = 0.
+        if task not in mixed_tasks:
+            predicted_activation = task_union_utility(
+                np.asarray([opposite for _, opposite, _, _ in selected]),
+                [count for _, _, count, _ in selected])
+        plans.append(dict(
+            task_ref=task, allocated_budget=sum(count for _, _, count, _ in selected),
+            predicted_activation=predicted_activation,
+            predicted_new_mixed_states=sum(gain for _, _, _, gain in selected),
+            already_mixed_bare=task in mixed_tasks,
+            selected_states=len(selected)))
+
+    prefix = 'agent_dps/allocator/'
+    metrics = {prefix + key: float(value) for key, value in dict(
+        budget=budget, used_budget=used, unspent_budget=budget - used,
+        budget_utilization=used / max(1, budget), n_states=len(nodes),
+        n_eligible_states=len(eligible), n_selected_states=len(allocations),
+        task_union_enabled=1, local_state_contrast_enabled=1,
+        predicted_new_mixed_states=sum(a.cumulative_utility for a in allocations),
+        predicted_new_mixed_tasks=sum(plan['predicted_activation'] for plan in plans),
+        task_covered_count=len(plans), posterior_optimal_knapsack=1,
+        task_union_beam_width=0, atomic_opening_size=opening,
+        min_k=min((a.continuation_count for a in allocations), default=0),
+        max_k=max((a.continuation_count for a in allocations), default=0),
+        mean_k=used / max(1, len(allocations)),
+        mean_marginal_gain=sum(a.marginal_utility for a in allocations) / max(1, len(allocations)),
+        predicted_created_contrast_sum=sum(a.cumulative_utility for a in allocations),
+        predicted_created_contrast_rate=sum(a.cumulative_utility for a in allocations) / max(1, len(allocations)),
+        bayesian_terminal_objective_enabled=1, prefilter_keep_fraction=1,
+        acquisition_prefilter_enabled=0).items()}
+    return allocations, metrics, plans
